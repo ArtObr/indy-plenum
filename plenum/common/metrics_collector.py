@@ -1,6 +1,7 @@
 import functools
 import struct
 import time
+import sys
 
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -255,6 +256,10 @@ class MetricsName(IntEnum):
     REPLICA_AQ_STASH_BACKUP = TMP_METRIC + 2026
     REPLICA_REPEATING_ACTIONS_BACKUP = TMP_METRIC + 2027
     REPLICA_SCHEDULED_BACKUP = TMP_METRIC + 2028
+
+    # Memory consumption
+    MEMORY_REQUESTS_DICT = TMP_METRIC + 3001
+    MEMORY_LEDGER_UNCOMMITED = TMP_METRIC + 3002
 
 
 MetricsEvent = NamedTuple('MetricsEvent', [('timestamp', datetime), ('name', MetricsName),

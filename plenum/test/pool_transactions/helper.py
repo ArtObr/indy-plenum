@@ -209,8 +209,7 @@ def sdk_add_new_nym(looper, sdk_pool_handle, creators_wallet,
     request_couple = sdk_sign_and_send_prepared_request(looper, creators_wallet,
                                                         sdk_pool_handle, nym_request)
 
-    # waitng for replies
-    sdk_get_and_check_replies(looper, [request_couple])
+
     return wh, new_did
 
 

@@ -9,7 +9,9 @@ from statistics import mean
 from typing import Dict, Any, Mapping, Iterable, List, Optional, Set, Tuple, Callable
 
 import psutil
+import sys
 from intervaltree import IntervalTree
+from plenum.common.perf_util import get_size
 
 from common.exceptions import LogicError
 from common.serializers.serialization import state_roots_serializer
@@ -118,6 +120,68 @@ from plenum.server.view_change.view_changer import ViewChanger
 pluginManager = PluginManager()
 logger = getlogger()
 
+
+def get_size(obj, seen=None, now_depth=0):
+    """Recursively finds size of objects"""
+    if now_depth > 15:
+        return 0
+    size = sys.getsizeof(obj)
+    if seen is None:
+        seen = set()
+    obj_id = id(obj)
+    if obj_id in seen:
+        return 0
+    # Important mark as seen *before* entering recursion to gracefully handle
+    # self-referential objects
+    seen.add(obj_id)
+    if isinstance(obj, dict):
+        size += sum([get_size(v, seen, now_depth + 1) for v in obj.values()])
+        size += sum([get_size(k, seen, now_depth + 1) for k in obj.keys()])
+    elif hasattr(obj, '__dict__'):
+        size += get_size(obj.__dict__, seen, now_depth + 1)
+    elif hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes, bytearray)):
+        size += sum([get_size(i, seen, now_depth + 1) for i in obj])
+    return size
+
+
+def get_max(obj, seen=None, now_depth=0, path=str()):
+    """Recursively finds size of objects"""
+    if now_depth > 15:
+        return {}
+    dictionary = {(path, type(obj)): sys.getsizeof(obj)}
+    path += str(type(obj)) + ' ---> '
+    if seen is None:
+        seen = set()
+    obj_id = id(obj)
+    if obj_id in seen:
+        return {}
+    # Important mark as seen *before* entering recursion to gracefully handle
+    # self-referential objects
+    seen.add(obj_id)
+    if isinstance(obj, dict):
+        vpath = path + 'value ---> '
+        for d in [get_max(v, seen, now_depth + 1, vpath) for v in obj.values()]:
+            updater(dictionary, d)
+        kpath = path + 'key ---> '
+        for d in [get_max(k, seen, now_depth + 1, kpath) for k in obj.keys()]:
+            updater(dictionary, d)
+    elif hasattr(obj, '__dict__'):
+        dpath = path + '__dict__ ---> '
+        d = get_max(obj.__dict__, seen, now_depth + 1, dpath)
+        updater(dictionary, d)
+    elif hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes, bytearray)):
+        ipath = path + '__iter__ ---> '
+        for d in [get_max(i, seen, now_depth + 1, ipath) for i in obj]:
+            updater(dictionary, d)
+    return dictionary
+
+
+def updater(store_d, new_d):
+    for k in new_d.keys():
+        if k in store_d:
+            store_d[k] += int(new_d[k])
+        else:
+            store_d[k] = new_d[k]
 
 class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
            HasPoolManager, PluginLoaderHelper, MessageReqProcessor, HookManager):
