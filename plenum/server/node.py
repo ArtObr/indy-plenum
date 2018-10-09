@@ -123,7 +123,7 @@ logger = getlogger()
 
 def get_size(obj, seen=None, now_depth=0):
     """Recursively finds size of objects"""
-    if now_depth > 15:
+    if now_depth > 10:
         return 0
     size = sys.getsizeof(obj)
     if seen is None:
@@ -146,7 +146,7 @@ def get_size(obj, seen=None, now_depth=0):
 
 def get_max(obj, seen=None, now_depth=0, path=str()):
     """Recursively finds size of objects"""
-    if now_depth > 15:
+    if now_depth > 10:
         return {}
     dictionary = {(path, type(obj)): sys.getsizeof(obj)}
     path += str(type(obj)) + ' ---> '
