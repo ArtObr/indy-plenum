@@ -121,29 +121,6 @@ pluginManager = PluginManager()
 logger = getlogger()
 
 
-def get_size(obj, seen=None, now_depth=0):
-    """Recursively finds size of objects"""
-    if now_depth > 10:
-        return 0
-    size = sys.getsizeof(obj)
-    if seen is None:
-        seen = set()
-    obj_id = id(obj)
-    if obj_id in seen:
-        return 0
-    # Important mark as seen *before* entering recursion to gracefully handle
-    # self-referential objects
-    seen.add(obj_id)
-    if isinstance(obj, dict):
-        size += sum([get_size(v, seen, now_depth + 1) for v in obj.values()])
-        size += sum([get_size(k, seen, now_depth + 1) for k in obj.keys()])
-    elif hasattr(obj, '__dict__'):
-        size += get_size(obj.__dict__, seen, now_depth + 1)
-    elif hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes, bytearray)):
-        size += sum([get_size(i, seen, now_depth + 1) for i in obj])
-    return size
-
-
 def get_max(obj, seen=None, now_depth=0, path=str()):
     """Recursively finds size of objects"""
     if now_depth > 10:
