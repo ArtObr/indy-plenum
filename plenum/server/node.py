@@ -3578,3 +3578,7 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
         authenticator = self.authNr(request.as_dict)
         if isinstance(authenticator, ReqAuthenticator):
             authenticator.clean_from_verified(request.key)
+
+    # def correct_pp_if_needed(self, replica: Replica):
+    #     if replica.lastPrePrepareSeqNo == 0 and replica.viewNo in :
+    #

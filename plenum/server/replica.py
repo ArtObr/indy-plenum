@@ -741,10 +741,12 @@ class Replica(HasActionQueue, MessageProcessor, HookManager):
                     (self.lastBatchCreated + self.config.Max3PCBatchWait < time.perf_counter() and
                      len(q) > 0):
                 oldStateRootHash = self.stateRootHash(lid, to_str=False)
+                self.node.correct_pp_if_needed(self)
                 ppReq = self.create3PCBatch(lid)
                 if ppReq is None:
                     continue
                 self.sendPrePrepare(ppReq)
+                # self.node.update_cached_pp
                 self.trackBatches(ppReq, oldStateRootHash)
                 r += 1
 
