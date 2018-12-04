@@ -1,25 +1,17 @@
 import random
 import types
+import common.error
+
 from functools import partial
 from typing import Any
 
-from collections import Iterable
-
-from libnacl.sign import Signer
 from plenum.server.router import Router
-
-import common.error
-import plenum.common.error
 from plenum.common.types import f
-
-from plenum.common.messages.node_messages import ViewChangeDone, Nomination, Batch, Reelection, \
-    Primary, BlacklistMsg, RequestAck, RequestNack, Reject, PoolLedgerTxns, Ordered, \
-    Propagate, PrePrepare, Prepare, Commit, Checkpoint, ThreePCState, CheckpointState, \
-    Reply, InstanceChange, LedgerStatus, ConsistencyProof, CatchupReq, CatchupRep, ViewChangeDone, \
-    CurrentState, MessageReq, MessageRep, ElectionType, ThreePhaseType, ThreePhaseMsg
+from plenum.common.messages.node_messages import Propagate, PrePrepare, Prepare, \
+    Commit, Reply, ThreePhaseMsg
 from plenum.common.request import Request
-
 from plenum.common.util import updateNamedTuple
+
 from plenum.server.node import Node
 from stp_core.common.log import getlogger
 from plenum.server.replica import TPCStat
@@ -28,6 +20,27 @@ from plenum.test.test_node import TestNode, TestReplica, getPrimaryReplica, \
 from plenum.test.delayers import ppDelay, cDelay
 
 logger = getlogger()
+
+messages = []
+
+
+def dont_send_msgs(self, msg: Any, *rids, signer=None, message_splitter=None):
+    if isinstance(msg, messages):
+        if rids:
+            rids = [rid for rid in rids if rid != self.nodestack.getRemote(self.ignore_node_name).uid]
+        else:
+            rids = [self.nodestack.getRemote(name).uid for name
+                    in self.nodestack.remotes.keys() if name != self.ignore_node_name]
+    self.old_send(msg, *rids, signer=signer, message_splitter=message_splitter)
+
+
+def dont_send_msgs_to(nodes, ignore_node_name, *msgs):
+    global messages
+    messages = msgs
+    for node in nodes:
+        node.ignore_node_name = ignore_node_name
+        node.old_send = types.MethodType(Node.send, node)
+        node.send = types.MethodType(dont_send_msgs, node)
 
 
 def makeNodeFaulty(node, *behaviors):
