@@ -279,12 +279,18 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
         self.register_req_handler(self.getPoolReqHandler(), POOL_LEDGER_ID)
         self.register_executer(POOL_LEDGER_ID, self.executePoolTxns)
         self.initPoolState()
+
+        # Pool manager initialization
         HasPoolManager.__init__(self, self.states[POOL_LEDGER_ID],
                                 self._poolLedger, ha, cliname, cliha)
+        self.nodeReg = self.poolManager.nodeReg
+        self.cliNodeReg = self.poolManager.cliNodeReg
 
         # init BLS after pool manager!
         # init before domain req handler!
         self.bls_bft = self._create_bls_bft()
+        self.get_req_handler(POOL_LEDGER_ID).bls_crypto_verifier = \
+            self.bls_bft.bls_crypto_verifier
 
         # This is storage for storing map: timestamp/state.headHash
         # Now it used in domainLedger
@@ -302,14 +308,8 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
         self.addGenesisNyms()
 
         self.mode = None  # type: Optional[Mode]
-        self.get_req_handler(POOL_LEDGER_ID).bls_crypto_verifier = \
-            self.bls_bft.bls_crypto_verifier
-
-        self.nodeReg = self.poolManager.nodeReg
 
         self.network_stacks_initialization(seed)
-
-        self.cliNodeReg = self.poolManager.cliNodeReg
 
         HasActionQueue.__init__(self)
 
@@ -444,6 +444,19 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
         self._info_tool = self._info_tool_class(self)
 
         self._last_performance_check_data = {}
+
+        self.configLedger = self.getConfigLedger()
+        self.register_state(CONFIG_LEDGER_ID, self.loadConfigState())
+        self.configReqHandler = self.getConfigReqHandler()
+        self.register_req_handler(self.configReqHandler, CONFIG_LEDGER_ID)
+        self.actionReqHandler = self.get_action_req_handler()
+        self.register_req_handler(self.actionReqHandler)
+
+        self.initConfigState()
+
+        self.setup_config_req_handler()
+        self.setup_action_req_handler()
+        self.init_config_state()
 
         self.init_config_ledger_and_req_handler()
 
@@ -668,15 +681,6 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
                                name=self.name + NODE_PRIMARY_STORAGE_SUFFIX,
                                dataDir=self.dataLocation,
                                config=self.config)
-
-    def loadConfigState(self):
-        return PruningState(
-            initKeyValueStorage(
-                self.config.configStateStorage,
-                self.dataLocation,
-                self.config.configStateDbName,
-                db_config=self.config.db_state_config)
-        )
 
     def getConfigReqHandler(self):
         return ConfigReqHandler(self.configLedger,
@@ -1060,6 +1064,15 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
                 self.config.poolStateStorage,
                 self.dataLocation,
                 self.config.poolStateDbName,
+                db_config=self.config.db_state_config)
+        )
+
+    def loadConfigState(self):
+        return PruningState(
+            initKeyValueStorage(
+                self.config.configStateStorage,
+                self.dataLocation,
+                self.config.configStateDbName,
                 db_config=self.config.db_state_config)
         )
 
