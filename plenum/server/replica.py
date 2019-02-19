@@ -19,7 +19,7 @@ from orderedset import OrderedSet
 
 from plenum.common.config_util import getConfig
 from plenum.common.constants import THREE_PC_PREFIX, PREPREPARE, PREPARE, \
-    ReplicaHooks, DOMAIN_LEDGER_ID, COMMIT, POOL_LEDGER_ID
+    ReplicaHooks, DOMAIN_LEDGER_ID, COMMIT, POOL_LEDGER_ID, AUDIT_LEDGER_ID
 from plenum.common.exceptions import SuspiciousNode, \
     InvalidClientMessageException, UnknownIdentifier
 from plenum.common.hook_manager import HookManager
@@ -440,8 +440,9 @@ class Replica(HasActionQueue, MessageProcessor, HookManager):
         # the request key needs to be removed once its ordered
         if ledger_id not in self.requestQueues:
             self.requestQueues[ledger_id] = OrderedSet()
-        self._freshness_checker.register_ledger(ledger_id=ledger_id,
-                                                initial_time=self.get_time_for_3pc_batch())
+        if ledger_id != AUDIT_LEDGER_ID:
+            self._freshness_checker.register_ledger(ledger_id=ledger_id,
+                                                    initial_time=self.get_time_for_3pc_batch())
 
     def ledger_uncommitted_size(self, ledgerId):
         if not self.isMaster:
@@ -937,7 +938,8 @@ class Replica(HasActionQueue, MessageProcessor, HookManager):
             self.outBox.extend(rejects)
             self.node.onBatchCreated(
                 ledger_id, self.stateRootHash(
-                    ledger_id, to_str=False))
+                    ledger_id, to_str=False),
+                tm)
         return pre_prepare
 
     def consume_req_queue_for_pre_prepare(self, ledger_id, tm,
@@ -1047,7 +1049,7 @@ class Replica(HasActionQueue, MessageProcessor, HookManager):
         if self.isMaster:
             # TODO: can pre_state_root be used here instead?
             state_root = self.stateRootHash(pre_prepare.ledgerId, to_str=False)
-            self.node.onBatchCreated(pre_prepare.ledgerId, state_root)
+            self.node.onBatchCreated(pre_prepare.ledgerId, state_root, pre_prepare.ppTime)
             # BLS multi-sig:
             self._bls_bft_replica.process_pre_prepare(pre_prepare, sender)
             self.logger.trace("{} saved shared multi signature for "

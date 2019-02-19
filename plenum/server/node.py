@@ -18,6 +18,8 @@ from crypto.bls.bls_key_manager import LoadBLSKeyError
 from plenum.common.metrics_collector import KvStoreMetricsCollector, NullMetricsCollector, MetricsName, \
     async_measure_time, measure_time, MetricsCollector
 from plenum.server.backup_instance_faulty_processor import BackupInstanceFaultyProcessor
+from plenum.server.batch_handlers.audit_batch_handler import AuditBatchHandler
+from plenum.server.database_manager import DatabaseManager
 from plenum.server.inconsistency_watchers import NetworkInconsistencyWatcher
 from plenum.server.last_sent_pp_store_helper import LastSentPpStoreHelper
 from plenum.server.quota_control import StaticQuotaControl, RequestQueueQuotaControl
@@ -44,7 +46,7 @@ from plenum.common.constants import POOL_LEDGER_ID, DOMAIN_LEDGER_ID, \
     OP_FIELD_NAME, CATCH_UP_PREFIX, NYM, \
     GET_TXN, DATA, VERKEY, \
     TARGET_NYM, ROLE, STEWARD, TRUSTEE, ALIAS, \
-    NODE_IP, BLS_PREFIX, NodeHooks, LedgerState, CURRENT_PROTOCOL_VERSION
+    NODE_IP, BLS_PREFIX, NodeHooks, LedgerState, CURRENT_PROTOCOL_VERSION, AUDIT_LEDGER_ID
 from plenum.common.exceptions import SuspiciousNode, SuspiciousClient, \
     MissingNodeOp, InvalidNodeOp, InvalidNodeMsg, InvalidClientMsgType, \
     InvalidClientRequest, BaseExc, \
@@ -229,7 +231,7 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
     # The order of ledger id in the following list determines the order in
     # which those ledgers will be synced. Think carefully before changing the
     # order.
-    ledger_ids = [POOL_LEDGER_ID, CONFIG_LEDGER_ID, DOMAIN_LEDGER_ID]
+    ledger_ids = [AUDIT_LEDGER_ID, POOL_LEDGER_ID, CONFIG_LEDGER_ID, DOMAIN_LEDGER_ID]
     _wallet_class = Wallet
 
     def __init__(self,
@@ -307,6 +309,9 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
         self.register_state(CONFIG_LEDGER_ID, self.init_config_state())
         self.register_req_handler(self.init_config_req_handler(), CONFIG_LEDGER_ID)
         self.upload_config_state()
+
+        # Audit ledger init
+        self._auditLedger = self.init_audit_ledger()
 
         # Number of read requests the node has processed
         self.total_read_request_number = 0
@@ -479,6 +484,13 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
         self._observable = Observable()
         self._observer = NodeObserver(self)
 
+        self.db_manager = DatabaseManager()
+        for ledger_id in self.ledger_ids:
+            self.db_manager.register_new_database(lid=ledger_id,
+                                                  ledger=self.getLedger(ledger_id),
+                                                  state=self.getState(ledger_id))
+        self.audit_handler = AuditBatchHandler(self.db_manager, self.master_replica)
+
     def config_and_dirs_init(self, name, config, config_helper, ledger_dir, keys_dir,
                              genesis_dir, plugins_dir, node_info_dir, pluginPaths):
         self.created = time.time()
@@ -611,6 +623,10 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
     def configLedger(self):
         return self._configLedger
 
+    @property
+    def auditLedger(self):
+        return self._auditLedger
+
     def init_pool_ledger(self):
         genesis_txn_initiator = GenesisTxnInitiatorFromFile(
             self.genesis_dir, self.config.poolTransactionsFile)
@@ -647,6 +663,12 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
         return Ledger(CompactMerkleTree(hashStore=self.getHashStore('config')),
                       dataDir=self.dataLocation,
                       fileName=self.config.configTransactionsFile,
+                      ensureDurability=self.config.EnsureLedgerDurability)
+
+    def init_audit_ledger(self):
+        return Ledger(CompactMerkleTree(hashStore=self.getHashStore('audit')),
+                      dataDir=self.dataLocation,
+                      fileName=self.config.auditTransactionsFile,
                       ensureDurability=self.config.EnsureLedgerDurability)
 
     # STATES
@@ -801,6 +823,9 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
         self.mode = Mode.syncing
 
     def preDomainLedgerCatchup(self, **kwargs):
+        self.mode = Mode.syncing
+
+    def preAuditLedgerCatchup(self, **kwargs):
         self.mode = Mode.syncing
 
     def postConfigLedgerCaughtUp(self, **kwargs):
@@ -1010,7 +1035,7 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
         three_pc_key = self.three_phase_key_for_txn_seq_no(ledger_id,
                                                            ledger_size)
         v, p = three_pc_key if three_pc_key else (None, None)
-        return LedgerStatus(ledger_id, ledger.size, v, p, ledger.root_hash, CURRENT_PROTOCOL_VERSION)
+        return LedgerStatus(ledger_id, ledger_size, v, p, ledger.root_hash, CURRENT_PROTOCOL_VERSION)
 
     @property
     def poolLedgerStatus(self):
@@ -1075,6 +1100,15 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
             postTxnAddedToLedgerClbk=self.postTxnFromCatchupAddedToLedger)
         self.on_new_ledger_added(DOMAIN_LEDGER_ID)
 
+    def _add_audit_ledger(self):
+        self.ledgerManager.addLedger(
+            AUDIT_LEDGER_ID,
+            self.auditLedger,
+            preCatchupStartClbk=self.preAuditLedgerCatchup,
+            postCatchupCompleteClbk=self.postAuditLedgerCaughtUp,
+            postTxnAddedToLedgerClbk=self.postTxnFromCatchupAddedToLedger)
+        self.on_new_ledger_added(AUDIT_LEDGER_ID)
+
     def getHashStore(self, name) -> HashStore:
         """
         Create and return a hashStore implementation based on configuration
@@ -1091,6 +1125,7 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
                              metrics=self.metrics)
 
     def init_ledger_manager(self):
+        self._add_audit_ledger()
         self._add_pool_ledger()
         self._add_config_ledger()
         self._add_domain_ledger()
@@ -2202,11 +2237,9 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
         self.id
 
     def postDomainLedgerCaughtUp(self, **kwargs):
-        """
-        Process any stashed ordered requests and set the mode to
-        `participating`
-        :return:
-        """
+        pass
+
+    def postAuditLedgerCaughtUp(self, **kwargs):
         pass
 
     def preLedgerCatchUp(self, ledger_id):
@@ -2509,7 +2542,7 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
         for req in requests:
             self.applyReq(req, cons_time)
         state_root = self.stateRootHash(ledger_id, isCommitted=False)
-        self.onBatchCreated(ledger_id, state_root)
+        self.onBatchCreated(ledger_id, state_root, cons_time)
 
     def handle_request_if_forced(self, request: Request):
         if request.isForced():
@@ -3360,6 +3393,12 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
             )
             raise
 
+        self.audit_handler.commit_batch(ledger_id=ledger_id,
+                                        txn_count=len(valid_reqs_keys),
+                                        state_root=state_root,
+                                        txn_root=txn_root,
+                                        pp_time=pp_time)
+
         for req_key in valid_reqs_keys + invalid_reqs_keys:
             if req_key in self.requests:
                 self.mark_request_as_executed(self.requests[req_key].request)
@@ -3455,7 +3494,7 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
     def hook_post_send_reply(self, txns, pp_time):
         self.execute_hook(NodeHooks.POST_SEND_REPLY, committed_txns=txns, pp_time=pp_time)
 
-    def onBatchCreated(self, ledger_id, state_root):
+    def onBatchCreated(self, ledger_id, state_root, txn_time):
         """
         A batch of requests has been created and has been applied but
         committed to ledger and state.
@@ -3465,11 +3504,14 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
         """
         if ledger_id == POOL_LEDGER_ID:
             if isinstance(self.poolManager, TxnPoolManager):
-                self.get_req_handler(POOL_LEDGER_ID).onBatchCreated(state_root)
+                self.get_req_handler(POOL_LEDGER_ID).onBatchCreated(state_root, txn_time)
         elif self.get_req_handler(ledger_id):
-            self.get_req_handler(ledger_id).onBatchCreated(state_root)
+            self.get_req_handler(ledger_id).onBatchCreated(state_root, txn_time)
         else:
             logger.debug('{} did not know how to handle for ledger {}'.format(self, ledger_id))
+
+        self.audit_handler.post_batch_applied(ledger_id, state_root, txn_time)
+
         self.execute_hook(NodeHooks.POST_BATCH_CREATED, ledger_id, state_root)
 
     def onBatchRejected(self, ledger_id):
@@ -3487,6 +3529,9 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
             self.get_req_handler(ledger_id).onBatchRejected()
         else:
             logger.debug('{} did not know how to handle for ledger {}'.format(self, ledger_id))
+
+        self.audit_handler.post_batch_rejected(ledger_id)
+
         self.execute_hook(NodeHooks.POST_BATCH_REJECTED, ledger_id)
 
     def sendRepliesToClients(self, committedTxns, ppTime):
@@ -3759,8 +3804,10 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
 
     def transform_txn_for_ledger(self, txn):
         txn_type = get_type(txn)
-        return self.get_req_handler(txn_type=txn_type). \
-            transform_txn_for_ledger(txn)
+        req_handler = self.get_req_handler(txn_type=txn_type)
+        if not req_handler:
+            return txn
+        return req_handler.transform_txn_for_ledger(txn)
 
     def __enter__(self):
         return self

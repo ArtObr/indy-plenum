@@ -140,3 +140,16 @@ class Ledger(_Ledger):
         self.uncommittedTxns = []
         self.uncommittedRootHash = None
         self.uncommittedTree = None
+
+    def get_uncommitted_txns(self):
+        return self.uncommittedTxns
+
+    def get_last_txn(self):
+        if self.uncommittedTxns:
+            return self.uncommittedTxns[-1]
+        return self.get_last_committed_txn()
+
+    def get_last_committed_txn(self):
+        if self.size > 0:
+            return self.getBySeqNo(self.size)
+        return None
