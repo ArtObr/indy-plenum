@@ -24,7 +24,7 @@ class BatchRequestHandler:
                             txn_root)
 
     @abstractmethod
-    def post_batch_applied(self, ledger_id, state_root, pp_time, prev_result=None):
+    def post_batch_applied(self, ledger_id, state_root, pp_time, view_no, pp_seq_no, prev_result=None):
         pass
 
     @abstractmethod

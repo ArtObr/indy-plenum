@@ -145,10 +145,14 @@ class ObserverSyncPolicyEachBatch(ObserverSyncPolicy):
         ledger_id = batch[f.LEDGER_ID.nm]
         state_root = batch[f.STATE_ROOT.nm]
         txn_root = batch[f.TXN_ROOT.nm]
+        view_no = batch[f.VIEW_NO.nm]
+        seq_no = batch[f.SEQ_NO.nm]
 
         self._node.apply_reqs(reqs,
                               pp_time,
-                              ledger_id)
+                              ledger_id,
+                              view_no,
+                              seq_no)
         self._node.get_executer(ledger_id)(pp_time,
                                            reqs,
                                            state_root,

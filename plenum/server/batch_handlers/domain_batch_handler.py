@@ -13,7 +13,7 @@ class DomainBatchHandler(BatchRequestHandler):
         self.database_manager.ts_store.set(pp_time, state_root)
         return commited_txns
 
-    def post_batch_applied(self, ledger_id, state_root, pp_time, prev_result=None):
+    def post_batch_applied(self, ledger_id, state_root, pp_time, view_no, pp_seq_no, prev_result=None):
         pass
 
     def post_batch_rejected(self, ledger_id):
