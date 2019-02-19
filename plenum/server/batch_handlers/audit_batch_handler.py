@@ -9,16 +9,15 @@ from plenum.server.database_manager import DatabaseManager
 
 class AuditBatchHandler(BatchRequestHandler):
 
-    def __init__(self, database_manager: DatabaseManager, master_replica):
+    def __init__(self, database_manager: DatabaseManager):
         super().__init__(database_manager, AUDIT_LEDGER_ID)
-        self._master_replica = master_replica
 
-    def _create_audit_txn_data(self, ledger_id, last_audit_txn):
+    def _create_audit_txn_data(self, ledger_id, last_audit_txn, view_no, pp_seq_no):
         # 1. general format and (view_no, pp_seq_no)
         txn = {
             TXN_VERSION: "1",
-            AUDIT_TXN_VIEW_NO: self._master_replica.viewNo,
-            AUDIT_TXN_PP_SEQ_NO: self._master_replica.lastPrePrepareSeqNo,
+            AUDIT_TXN_VIEW_NO: view_no,
+            AUDIT_TXN_PP_SEQ_NO: pp_seq_no,
             AUDIT_TXN_LEDGERS_SIZE: {},
             AUDIT_TXN_LEDGER_ROOT: {},
             AUDIT_TXN_STATE_ROOT: {}
@@ -62,9 +61,9 @@ class AuditBatchHandler(BatchRequestHandler):
         elif last_audit_txn_data:
             txn[AUDIT_TXN_LEDGER_ROOT][str(lid)] = get_seq_no(last_audit_txn)
 
-    def post_batch_applied(self, ledger_id, state_root, pp_time, prev_result=None):
+    def post_batch_applied(self, ledger_id, state_root, pp_time, view_no, pp_seq_no, prev_result=None):
         # 1. prepare AUDIT txn
-        txn_data = self._create_audit_txn_data(ledger_id, self.ledger.get_last_txn())
+        txn_data = self._create_audit_txn_data(ledger_id, self.ledger.get_last_txn(), view_no, pp_seq_no)
         txn = init_empty_txn(txn_type=PlenumTransactions.AUDIT.value)
         txn = set_payload_data(txn, txn_data)
 

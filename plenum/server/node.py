@@ -489,7 +489,7 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
             self.db_manager.register_new_database(lid=ledger_id,
                                                   ledger=self.getLedger(ledger_id),
                                                   state=self.getState(ledger_id))
-        self.audit_handler = AuditBatchHandler(self.db_manager, self.master_replica)
+        self.audit_handler = AuditBatchHandler(self.db_manager)
 
     def config_and_dirs_init(self, name, config, config_helper, ledger_dir, keys_dir,
                              genesis_dir, plugins_dir, node_info_dir, pluginPaths):
@@ -2525,7 +2525,7 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
                           cons_time=cons_time, ledger_id=ledger_id,
                           seq_no=seq_no, txn=txn)
 
-    def apply_stashed_reqs(self, request_ids, cons_time: int, ledger_id):
+    def apply_stashed_reqs(self, request_ids, cons_time: int, ledger_id, view_no, pp_seq_no):
         requests = []
         for req_key in request_ids:
             if req_key in self.requests:
@@ -2536,13 +2536,13 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
             _, seq_no = self.seqNoDB.get(req.digest)
             if seq_no is None:
                 requests.append(req)
-        self.apply_reqs(requests, cons_time, ledger_id)
+        self.apply_reqs(requests, cons_time, ledger_id, view_no, pp_seq_no)
 
-    def apply_reqs(self, requests, cons_time: int, ledger_id):
+    def apply_reqs(self, requests, cons_time: int, ledger_id, view_no, pp_seq_no):
         for req in requests:
             self.applyReq(req, cons_time)
         state_root = self.stateRootHash(ledger_id, isCommitted=False)
-        self.onBatchCreated(ledger_id, state_root, cons_time)
+        self.onBatchCreated(ledger_id, state_root, cons_time, view_no, pp_seq_no)
 
     def handle_request_if_forced(self, request: Request):
         if request.isForced():
@@ -3494,7 +3494,7 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
     def hook_post_send_reply(self, txns, pp_time):
         self.execute_hook(NodeHooks.POST_SEND_REPLY, committed_txns=txns, pp_time=pp_time)
 
-    def onBatchCreated(self, ledger_id, state_root, txn_time):
+    def onBatchCreated(self, ledger_id, state_root, txn_time, view_no, pp_seq_no):
         """
         A batch of requests has been created and has been applied but
         committed to ledger and state.
@@ -3510,7 +3510,7 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
         else:
             logger.debug('{} did not know how to handle for ledger {}'.format(self, ledger_id))
 
-        self.audit_handler.post_batch_applied(ledger_id, state_root, txn_time)
+        self.audit_handler.post_batch_applied(ledger_id, state_root, txn_time, view_no, pp_seq_no)
 
         self.execute_hook(NodeHooks.POST_BATCH_CREATED, ledger_id, state_root)
 
@@ -3609,7 +3609,9 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
                 # stashed ordered requests was not processed.
                 self.apply_stashed_reqs(msg.valid_reqIdr,
                                         msg.ppTime,
-                                        msg.ledgerId)
+                                        msg.ledgerId,
+                                        msg.viewNo,
+                                        msg.ppSeqNo)
 
             self.processOrdered(msg)
             i += 1

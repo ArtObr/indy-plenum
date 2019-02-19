@@ -14,7 +14,7 @@ def master_replica(txnPoolNodeSet):
 
 @pytest.fixture(scope="function")
 def alh(db_manager, master_replica):
-    audit_ledger_handler = AuditBatchHandler(db_manager, master_replica)
+    audit_ledger_handler = AuditBatchHandler(db_manager)
     yield audit_ledger_handler
     for db in db_manager.databases.values():
         db.reset()
@@ -28,7 +28,7 @@ def do_apply_audit_txn(alh,
     db_manager = alh.database_manager
     set_3pc_batch(master_replica, view_no, pp_sq_no)
     add_txns(db_manager, ledger_id, txns_count, txn_time)
-    alh.post_batch_applied(ledger_id, db_manager.get_state(ledger_id).headHash, txn_time)
+    alh.post_batch_applied(ledger_id, db_manager.get_state(ledger_id).headHash, txn_time, view_no, pp_sq_no)
 
 
 def check_apply_audit_txn(alh,

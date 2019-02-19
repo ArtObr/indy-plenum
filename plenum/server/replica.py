@@ -937,9 +937,8 @@ class Replica(HasActionQueue, MessageProcessor, HookManager):
         if self.isMaster:
             self.outBox.extend(rejects)
             self.node.onBatchCreated(
-                ledger_id, self.stateRootHash(
-                    ledger_id, to_str=False),
-                tm)
+                ledger_id, self.stateRootHash(ledger_id, to_str=False),
+                tm, pre_prepare.viewNo, pre_prepare.ppSeqNo)
         return pre_prepare
 
     def consume_req_queue_for_pre_prepare(self, ledger_id, tm,
@@ -1049,7 +1048,8 @@ class Replica(HasActionQueue, MessageProcessor, HookManager):
         if self.isMaster:
             # TODO: can pre_state_root be used here instead?
             state_root = self.stateRootHash(pre_prepare.ledgerId, to_str=False)
-            self.node.onBatchCreated(pre_prepare.ledgerId, state_root, pre_prepare.ppTime)
+            self.node.onBatchCreated(pre_prepare.ledgerId, state_root, pre_prepare.ppTime,
+                                     pre_prepare.viewNo, pre_prepare.ppSeqNo)
             # BLS multi-sig:
             self._bls_bft_replica.process_pre_prepare(pre_prepare, sender)
             self.logger.trace("{} saved shared multi signature for "
